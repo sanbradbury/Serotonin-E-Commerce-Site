@@ -1,0 +1,281 @@
+<?php 
+require_once 'dbh.inc.php';
+session_start();
+
+
+//Check if user is logged in
+if (isset($_SESSION["user"])) {
+    $userEmail = $_SESSION["user"];
+
+    //Retrieve user's name from the users table
+    $sql2 = "SELECT user_id, full_name FROM users WHERE email = ?";
+    $stmt = $conn->prepare($sql2);
+    $stmt -> bind_param('s', $userEmail);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $user = $result->fetch_assoc();
+    $userId = $user["user_id"];
+    $fullName = $user["full_name"];
+    $stmt->close();
+} else {
+    $userId = null;
+}
+
+$sql = "SELECT c.cart_item_id, c.quantity, c.price, p.product_id, p.prod_name, v.variant_id AS product_variant_id
+        FROM cart_items c
+        INNER JOIN product_variants v ON c.product_variant_id = v.variant_id
+        INNER JOIN products p ON v.product_id = p.product_id
+        WHERE c.user_id = ?";
+$stmt = $conn->prepare($sql);
+$stmt->bind_param('i', $userId);
+$stmt->execute();
+$result = $stmt->get_result();
+$cartItems = $result->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+$totalPrice = 0;
+
+
+if (isset($_POST["place_order"])) {
+    // Check if the payment method is selected
+    if (isset($_POST["payment_method"]) && ($_POST["payment_method"] == "cash" || $_POST["payment_method"] == "eft")) {
+        $paymentMethod = $_POST["payment_method"];
+        
+        // Insert the order into the orders table
+        $orderStatus = 0;
+        $paymentStatus = 0;
+        $orderDate = date("Y-m-d");
+        $insertOrderQuery = "INSERT INTO orders (user_id, payment_method, payment_status, order_status, order_date)
+                             VALUES (?, ?, ?, ?, ?)";
+        $stmt = $conn->prepare($insertOrderQuery);
+        $stmt->bind_param('isiis', $userId, $paymentMethod, $paymentStatus, $orderStatus, $orderDate);
+        $stmt->execute();
+        
+        // Check if the order was inserted successfully
+        if ($stmt->affected_rows > 0) {
+            // Retrieve the generated order_id
+            $orderId = $stmt->insert_id;
+            $stmt->close();
+            
+            // Insert the order details into the order_details table
+            foreach ($cartItems as $item) {
+                $productVariantId = $item["product_variant_id"]; // Update the variable name
+                $productPrice = $item["price"];
+                $quantity = $item["quantity"];
+                $price = $productPrice * $quantity;
+                
+                $insertOrderDetailsQuery = "INSERT INTO order_details (order_id, product_variant_id, quantity, price)
+                                            VALUES (?, ?, ?, ?)";
+                $stmt = $conn->prepare($insertOrderDetailsQuery);
+                $stmt->bind_param('iiid', $orderId, $productVariantId, $quantity, $price); // Update the parameter binding
+                $stmt->execute();
+                
+                // Check if the order details were inserted successfully
+                if ($stmt->affected_rows <= 0) {
+                    // Handle the case when order details insertion fails
+                    echo "Failed to insert order details.";
+                    exit();
+                }
+            }
+            
+            // Clear the user's cart
+            $clearCartQuery = "DELETE FROM cart_items WHERE user_id = ?";
+            $stmt = $conn->prepare($clearCartQuery);
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $stmt->close();
+            
+            // Redirect to the order confirmation page
+            header("Location: order-confirmation.php");
+            exit();
+        } else {
+            // Handle the case when order insertion fails
+            echo "Failed to insert order.";
+            exit();
+        }
+    } else {
+        // Handle the case when payment method is not selected
+        echo "Please select a payment method.";
+        exit();
+    }
+}
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serotonin</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://unpkg.com/boxicons@latest/css/boxicons.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Open+Sans:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@900&display=swap" rel="stylesheet"> 
+</head>
+<body>
+<div class="top-nav">
+        
+        <div class="dropdown">
+            <?php if (isset($_SESSION["user"])) : ?>
+                <a href="#">Hi, <?php echo $fullName; ?></a>
+            <?php else: ?>
+            <a href="login.php">Sign in</a>
+            <div class="dropdown-content">
+                <a href="login.php">Sign in</a>
+                <a href="signUp.php">Join Us</a>
+            </div>
+            <?php endif; ?>
+        </div>
+        <div class="nav-divider">
+            |
+        </div>
+        <div class="dropdown-account">
+            <a href="#"><i class='bx bx-user bx-sm'></i></a>
+            <div class="dropdown-content-account">
+                <a href="logout.php">Logout</a>
+            </div>
+        </div>
+        
+            
+        
+    </div>
+
+    <div class="nav-container">
+        <div class="logo">
+            <p>Serotonin</p>
+        </div>
+
+        <nav class="nav-bar">
+            <i class='bx bx-menu bx-lg'></i>
+            
+            <ul>
+                <li><a href="index.php">Home</a></li> 
+                <li><a href="new.php">New</a></li>
+                <li><a href="gender.php?gender=women" >Women</a></li>
+                <li><a href="gender.php?gender=men" >Men</a></li>
+            </ul>
+        </nav>
+
+        <form class="form">
+            <label for="search">
+                <input required="" autocomplete="off" placeholder="search products" id="search" type="text">
+                <div class="icon">
+                    <svg stroke-width="2" stroke="currentColor" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="swap-on">
+                        <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-linejoin="round" stroke-linecap="round"></path>
+                    </svg>
+                </div>
+            </label>
+        </form>
+
+        <div class="icons">
+            <a href="cart.php"><i class='bx bx-shopping-bag bx-sm' ></i></a>
+        </div>
+    </div>
+
+    <span class="divider"></span>
+
+    <div class="checkout-main">
+        <div class="orderDetails">
+            <div class="order-no-info">
+                <h1>Summary:</h1>
+                <p>Reciept</p>
+            </div>
+            <div class="iteminfo">
+                <?php foreach ($cartItems as $item) {
+                    $itemTotalPrice = $item["price"] * $item["quantity"];
+                    $totalPrice += $itemTotalPrice;
+                ?>
+                <span class="item">
+                    <p><?php echo $item["prod_name"];?></p>
+                    <p>R<?php echo $itemTotalPrice;?></p>
+                </span>
+                <?php } ?>
+            </div>
+            <div class="subtotal-tax">
+                <span class="subtot">
+                    <p>Sub Total</p>
+                    <p id="sub--total">R<?php echo $totalPrice;?></p>
+                </span>
+                <?php 
+                $shippingFee = 250;
+                $finalTotal = $totalPrice + $shippingFee;
+                ?>
+                <span class="subtot">
+                    <p>Shipping</p>
+                    <p id="ship">R<?php echo $shippingFee;?></p>
+                </span>
+            </div>
+            <div class="total">
+                <span class="totsection">
+                    <p>Total</p>
+                    <p id="total-t">R<?php echo $finalTotal;?></p>
+                </span>
+            </div>
+        </div>
+        <div class="cardDetails-container">
+            
+            <div class="carddetails">
+                <form action="" method="POST">
+                    <label for="cash"> Pay Cash</label>
+                    <input type="radio" id="cash" name="payment_method" value="cash">
+                    <label for="eft"> Pay EFT</label>
+                    <input type="radio" id="eft" name="payment_method" value="eft">
+                    <div class="eft-info">
+                        Account Name: SEROTONIN <br> 
+                        Bank: First National Bank <br>
+                        Branch: Southdale / 254 205 <br>
+                        Account Number: 62362508396 <br>
+                        Account Type: Cheque <br>
+
+                        Beneficiary Reference: <br>
+                        Name and surname <br>
+                        (Email us for info info@serotonin.com)
+                    </div>
+                    <button class="pay-now" type="submit" name="place_order">Place Order</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="footer-nav">
+            <ul class="help">
+                <li id="help-h"><a href="#">GET HELP</a></li>
+                <li><a href="#">Order Status</a></li>
+                <li><a href="#">Shipping</a></li>
+                <li><a href="#">Returns</a></li>
+                <li><a href="#">Payment Options</a></li>
+            </ul>
+
+            <ul class="about">
+                <li id="about-h"><a href="#">ABOUT SEROTONIN</a></li>
+                <li><a href="#">News</a></li>
+                <li><a href="#">Investors</a></li>
+                <li><a href="#">Sustainability</a></li>
+            </ul>
+
+            <ul class="contact">
+                <li id="contact-h"><a href="#">CONTACT US</a></li>
+                <li><a href="#">SerotoninApparel@gmail.com</a></li>
+                <li><a href="#">0718644170</a></li>
+                <li><a href="#">0118564363</a></li>
+                <li><a href="https://goo.gl/maps/KYRwAk81X17bQ8sN9" target="_blank">P.O Box</a></li>
+            </ul>
+        </div>
+        <div class="social-media">
+            <a href="https://twitter.com/Sandevelops" target="_blank"><i class='bx bxl-twitter bx-md'></i></a>
+            <a href="https://www.instagram.com/serotonin.apparel/" target="_blank"><i class='bx bxl-instagram bx-md' ></i></a>
+            <a href="https://www.facebook.com/profile.php?id=100092407935966" target="_blank"><i class='bx bxl-facebook bx-md' ></i></a>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
