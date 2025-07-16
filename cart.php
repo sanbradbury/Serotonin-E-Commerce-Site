@@ -1,7 +1,7 @@
 <?php 
 require_once 'dbh.inc.php';
 session_start();
-
+//cart
 
 //Check if user is logged in
 if (isset($_SESSION["user"])) {
